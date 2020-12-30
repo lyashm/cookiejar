@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"golang.org/x/net/publicsuffix"
-	"gopkg.in/errgo.v1"
 )
 
 // PublicSuffixList provides the public suffix of a domain. For example:
@@ -63,22 +62,10 @@ type Options struct {
 	// If this is nil, the public suffix list implementation in golang.org/x/net/publicsuffix
 	// is used.
 	PublicSuffixList PublicSuffixList
-
-	// Filename holds the file to use for storage of the cookies.
-	// If it is empty, the value of DefaultCookieFile will be used.
-	Filename string
-
-	// NoPersist specifies whether no persistence should be used
-	// (useful for tests). If this is true, the value of Filename will be
-	// ignored.
-	NoPersist bool
 }
 
 // Jar implements the http.CookieJar interface from the net/http package.
 type Jar struct {
-	// filename holds the file that the cookies were loaded from.
-	filename string
-
 	psList PublicSuffixList
 
 	// mu locks the remaining fields.
@@ -86,7 +73,7 @@ type Jar struct {
 
 	// entries is a set of entries, keyed by their eTLD+1 and subkeyed by
 	// their name/domain/path.
-	entries map[string]map[string]entry
+	entries map[string]map[string]Entry
 }
 
 var noOptions Options
@@ -103,7 +90,7 @@ func New(o *Options) (*Jar, error) {
 // newAtTime is like New but takes the current time as a parameter.
 func newAtTime(o *Options, now time.Time) (*Jar, error) {
 	jar := &Jar{
-		entries: make(map[string]map[string]entry),
+		entries: make(map[string]map[string]Entry),
 	}
 	if o == nil {
 		o = &noOptions
@@ -111,15 +98,7 @@ func newAtTime(o *Options, now time.Time) (*Jar, error) {
 	if jar.psList = o.PublicSuffixList; jar.psList == nil {
 		jar.psList = publicsuffix.List
 	}
-	if !o.NoPersist {
-		if jar.filename = o.Filename; jar.filename == "" {
-			jar.filename = DefaultCookieFile()
-		}
-		if err := jar.load(); err != nil {
-			return nil, errgo.Notef(err, "cannot load cookies")
-		}
-	}
-	jar.deleteExpired(now)
+
 	return jar, nil
 }
 
@@ -131,13 +110,13 @@ func homeDir() string {
 	return os.Getenv("HOME")
 }
 
-// entry is the internal representation of a cookie.
+// Entry is the internal representation of a cookie.
 //
 // This struct type is not used outside of this package per se, but the exported
 // fields are those of RFC 6265.
 // Note that this structure is marshaled to JSON, so backward-compatibility
 // should be preserved.
-type entry struct {
+type Entry struct {
 	Name       string
 	Value      string
 	Domain     string
@@ -164,7 +143,7 @@ type entry struct {
 }
 
 // id returns the domain;path;name triple of e as an id.
-func (e *entry) id() string {
+func (e *Entry) id() string {
 	return id(e.Domain, e.Path, e.Name)
 }
 
@@ -176,12 +155,12 @@ func id(domain, path, name string) string {
 // shouldSend determines whether e's cookie qualifies to be included in a
 // request to host/path. It is the caller's responsibility to check if the
 // cookie is expired.
-func (e *entry) shouldSend(https bool, host, path string) bool {
+func (e *Entry) shouldSend(https bool, host, path string) bool {
 	return e.domainMatch(host) && e.pathMatch(path) && (https || !e.Secure)
 }
 
 // domainMatch implements "domain-match" of RFC 6265 section 5.1.3.
-func (e *entry) domainMatch(host string) bool {
+func (e *Entry) domainMatch(host string) bool {
 	if e.Domain == host {
 		return true
 	}
@@ -189,7 +168,7 @@ func (e *entry) domainMatch(host string) bool {
 }
 
 // pathMatch implements "path-match" according to RFC 6265 section 5.1.4.
-func (e *entry) pathMatch(requestPath string) bool {
+func (e *Entry) pathMatch(requestPath string) bool {
 	if requestPath == e.Path {
 		return true
 	}
@@ -220,9 +199,9 @@ func (s byCanonicalHost) Less(i, j int) bool {
 	return s.byPathLength.Less(i, j)
 }
 
-// byPathLength is a []entry sort.Interface that sorts according to RFC 6265
+// byPathLength is a []Entry sort.Interface that sorts according to RFC 6265
 // section 5.4 point 2: by longest path and then by earliest creation time.
-type byPathLength []entry
+type byPathLength []Entry
 
 func (s byPathLength) Len() int { return len(s) }
 
@@ -277,7 +256,7 @@ func (j *Jar) cookies(u *url.URL, now time.Time) (cookies []*http.Cookie) {
 		path = "/"
 	}
 
-	var selected []entry
+	var selected []Entry
 	for id, e := range submap {
 		if !e.Expires.After(now) {
 			// Save some space by deleting the value when the cookie
@@ -316,7 +295,7 @@ func (j *Jar) AllCookies() (cookies []*http.Cookie) {
 
 // allCookies is like AllCookies but takes the current time as a parameter.
 func (j *Jar) allCookies(now time.Time) []*http.Cookie {
-	var selected []entry
+	var selected []Entry
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	for _, submap := range j.entries {
@@ -364,7 +343,7 @@ func (j *Jar) RemoveCookie(c *http.Cookie) {
 
 // merge merges all the given entries into j. More recently changed
 // cookies take precedence over older ones.
-func (j *Jar) merge(entries []entry) {
+func (j *Jar) merge(entries []Entry) {
 	for _, e := range entries {
 		if e.CanonicalHost == "" {
 			continue
@@ -373,7 +352,7 @@ func (j *Jar) merge(entries []entry) {
 		id := e.id()
 		submap := j.entries[key]
 		if submap == nil {
-			j.entries[key] = map[string]entry{
+			j.entries[key] = map[string]Entry{
 				id: e,
 			}
 			continue
@@ -483,7 +462,7 @@ func (j *Jar) setCookies(u *url.URL, cookies []*http.Cookie, now time.Time) {
 		e.CanonicalHost = host
 		id := e.id()
 		if submap == nil {
-			submap = make(map[string]entry)
+			submap = make(map[string]Entry)
 			j.entries[key] = submap
 		}
 		if old, ok := submap[id]; ok {
@@ -575,17 +554,17 @@ func defaultPath(path string) string {
 	return path[:i] // Path is either of form "/abc/xyz" or "/abc/xyz/".
 }
 
-// newEntry creates an entry from a http.Cookie c. now is the current
+// newEntry creates an Entry from a http.Cookie c. now is the current
 // time and is compared to c.Expires to determine deletion of c. defPath
 // and host are the default-path and the canonical host name of the URL
 // c was received from.
 //
-// The returned entry should be removed if its expiry time is in the
+// The returned Entry should be removed if its expiry time is in the
 // past. In this case, e may be incomplete, but it will be valid to call
 // e.id (which depends on e's Name, Domain and Path).
 //
 // A malformed c.Domain will result in an error.
-func (j *Jar) newEntry(c *http.Cookie, now time.Time, defPath, host string) (e entry, err error) {
+func (j *Jar) newEntry(c *http.Cookie, now time.Time, defPath, host string) (e Entry, err error) {
 	e.Name = c.Name
 	if c.Path == "" || c.Path[0] != '/' {
 		e.Path = defPath
