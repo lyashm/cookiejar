@@ -132,14 +132,14 @@ type Entry struct {
 	// Updated records when the cookie was updated.
 	// This is different from creation time because a cookie
 	// can be changed without updating the creation time.
-	Updated time.Time
+	Updated time.Time `bson:"updated"`
 
 	// CanonicalHost stores the original canonical host name
 	// that the cookie was associated with. We store this
 	// so that even if the public suffix list changes (for example
 	// when storing/loading cookies) we can still get the correct
 	// jar keys.
-	CanonicalHost string
+	CanonicalHost string `bson:"canonical_host"`
 }
 
 // id returns the domain;path;name triple of e as an id.
