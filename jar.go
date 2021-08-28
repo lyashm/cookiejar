@@ -117,17 +117,17 @@ func homeDir() string {
 // Note that this structure is marshaled to JSON, so backward-compatibility
 // should be preserved.
 type Entry struct {
-	Name       string
-	Value      string
-	Domain     string
-	Path       string
-	Secure     bool
-	HttpOnly   bool
-	Persistent bool
-	HostOnly   bool
-	Expires    time.Time
-	Creation   time.Time
-	LastAccess time.Time
+	Name       string    `bson:"name"`
+	Value      string    `bson:"value"`
+	Domain     string    `bson:"domain"`
+	Path       string    `bson:"path"`
+	Secure     bool      `bson:"secure"`
+	HttpOnly   bool      `bson:"http_only"`
+	Persistent bool      `bson:"persistent"`
+	HostOnly   bool      `bson:"host_only"`
+	Expires    time.Time `bson:"expires"`
+	Creation   time.Time `bson:"creation"`
+	LastAccess time.Time `bson:"last_access"`
 
 	// Updated records when the cookie was updated.
 	// This is different from creation time because a cookie
